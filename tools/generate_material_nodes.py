@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 import config
 import rowsink
+import world_variants
 from marker_common import (UNDERGROUND_AREAS, DLC_AREAS, OVERWORLD_AREAS,
                              resolve_location_id, resolve_location_id_at, is_dlc_plane)
 from unreachable import is_unreachable_in_err
@@ -65,6 +66,10 @@ def main():
     onetime_nodes = [n for n in all_nodes if n["model"] in onetime_models]
     print(f"One-time nodes in MSBs: {len(onetime_nodes)}")
 
+    # A node in only ONE version of a world-state tile (world_variants.py) gets that version's rule
+    # (generate_data, StateShow OnlyWhile*); one in both keeps one marker (the dedup below) - the twins share
+    # asset name and InstanceID, and the DLL reads the standing version's collected records.
+    variant_only = world_variants.single_variant_tags(onetime_nodes)
     # Deduplicate: same model + same coordinates = same physical object
     # (appears in multiple MSB variants like _00 and _10)
     seen_coords = set()
@@ -167,6 +172,8 @@ def main():
             slot = suffix - 9000
             # full_name e.g. "AEG099_651_9000"
             slots[str(entry["id"])] = {"geom_slot": slot, "name_suffix": suffix, "object_name": name}
+            if id(node) in variant_only:
+                slots[str(entry["id"])]["variant_only"] = variant_only[id(node)]
 
     slots_path = out_dir / "Loot - Material Nodes_slots.json"
     with open(slots_path, "w") as f:

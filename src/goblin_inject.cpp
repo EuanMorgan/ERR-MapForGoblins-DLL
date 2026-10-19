@@ -390,15 +390,16 @@ static bool row_group2_gate_off(const from::paramdef::WORLD_MAP_POINT_PARAM_ST *
 }
 
 // Does the world currently stand in the state this marker belongs to? (MapEntry::state_flag:
-// Leyndell's capitals, flag 300 ON = Ashen / OFF = Royal.) Read live, so the right capital's
+// Leyndell's capitals, flag 300 ON = Ashen / OFF = Royal; a spot found in one version of a
+// world-state tile, flags 300 / 310 / 330 - goblin_world_variants.hpp.) Read live, so the right
 // markers are there on the next map open after the switch, whatever else has been applied.
 // DELIBERATELY not part of row_is_hidden: that one means "done" to the Progress page, the search
-// and the focus prune, and a marker whose state is away is not done - it is waiting.
+// and the focus prune, and a marker whose state is away is not done - it is waiting (or, for an
+// OnlyWhile* rule, not in the world; the Progress page leaves those out itself).
 static bool row_state_open(const CategoryRow &cr)
 {
     if (cr.state_show == StateShow::Always || cr.state_flag == 0) return true;
-    const bool on = goblin::flag_is_set(cr.state_flag);
-    return cr.state_show == StateShow::WhileOn ? on : !on;
+    return goblin::generated::state_rule_open(cr.state_show, goblin::flag_is_set(cr.state_flag));
 }
 
 // Single "is this marker's icon currently hidden?" test, shared by the focus-highlight

@@ -1,7 +1,9 @@
 #include "goblin_collected.hpp"
 #include "goblin_config.hpp"
+#include "goblin_inject.hpp"   // goblin::flag_is_set (the world-state tile versions)
 #include "goblin_map_data.hpp"
 #include "goblin_geof_models.hpp"
+#include "goblin_world_variants.hpp"
 #include "modutils.hpp"
 
 #include <algorithm>
@@ -98,6 +100,49 @@ static bool g_initialized = false;
 static bool g_geof_seen_for_character = false;
 static bool g_rebuild_armed = false;
 static uint64_t g_rebuild_hold_since_ms = 0;
+
+// ── World-state tile versions (goblin_world_variants.hpp) ──
+// Which version of each disaster's tiles stands, from the disaster flags (300 / 310 / 330), read once per
+// refresh: 0 = the base `_00` tiles, 1 = the `_10` ones, -1 = not readable (then nothing is filtered by version,
+// the behaviour before versions were told apart). The flag is the state the next load streams; every setter
+// warps or reloads at once, so the two differ only for that moment.
+//
+// A tile's collected state is the STANDING version's: the game keeps each version's records under its own tile
+// id and never carries them across (a `_10` tile loads with none of its `_00` twin's records). A marker stands for
+// the same spot in both versions (same asset name and InstanceID, so the same slot); before 2026-10 it took the
+// union of both versions' records while the tile was unloaded and the live `_10` instances while loaded, so a
+// spot collected before the switch read collected from afar and not collected on the spot (and after the switch it
+// really is there to pick again).
+struct DisasterState
+{
+    int8_t v[3] = {-1, -1, -1};
+};
+static DisasterState g_last_disasters;  // the previous refresh's reading (refresh thread; reset per character)
+
+static DisasterState read_disaster_state()
+{
+    DisasterState s;
+    __try
+    {
+        for (int i = 0; i < 3; ++i)
+            s.v[i] = goblin::flag_is_set(goblin::world_variants::kDisasterFlags[i]) ? 1 : 0;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        for (int i = 0; i < 3; ++i) s.v[i] = -1;
+    }
+    return s;
+}
+
+// The standing version of a tile: 0 for a tile with one version, else its disaster's reading (-1 = unknown).
+static int standing_variant(const DisasterState &s, uint32_t tile_id)
+{
+    const uint32_t d = goblin::world_variants::tile_disaster(tile_id);
+    if (!d) return 0;
+    for (int i = 0; i < 3; ++i)
+        if (goblin::world_variants::kDisasterFlags[i] == d) return s.v[i];
+    return 0;
+}
 
 
 struct GEOFEntry
@@ -1050,18 +1095,66 @@ int goblin::collected::refresh()
 
     std::set<uint64_t> new_collected;
 
+    // The standing version of the world-state tiles, and the rows whose version changed since the last
+    // refresh: the sticky carry-forward below must not keep those hidden on the old version's word.
+    const DisasterState disasters = read_disaster_state();
+    std::set<uint64_t> version_switched_rows;
+    {
+        uint32_t changed[3] = {};
+        int n_changed = 0;
+        for (int i = 0; i < 3; ++i)
+            if (g_last_disasters.v[i] >= 0 && disasters.v[i] >= 0 && g_last_disasters.v[i] != disasters.v[i])
+                changed[n_changed++] = goblin::world_variants::kDisasterFlags[i];
+        if (n_changed)
+        {
+            for (const auto &[tile, rows] : g_tile_to_rows)
+            {
+                const uint32_t d = goblin::world_variants::tile_disaster(tile);
+                for (int i = 0; i < n_changed; ++i)
+                    if (d && d == changed[i]) version_switched_rows.insert(rows.begin(), rows.end());
+            }
+            for (int i = 0; i < 3; ++i)
+                if (g_last_disasters.v[i] >= 0 && disasters.v[i] >= 0 && g_last_disasters.v[i] != disasters.v[i])
+                    spdlog::info("[COLLECTED] world state: flag {} now {} - the {} version of its tiles stands; "
+                                 "{} marker(s) there read from that version's records",
+                                 goblin::world_variants::kDisasterFlags[i], disasters.v[i] ? "ON" : "OFF",
+                                 disasters.v[i] ? "_10" : "_00", version_switched_rows.size());
+        }
+        for (int i = 0; i < 3; ++i)
+            if (disasters.v[i] >= 0) g_last_disasters.v[i] = disasters.v[i];
+    }
+
     // Group GEOF entries by tile + prefix
     // key: tile_id → prefix → list of GEOF-computed slots
     std::map<uint32_t, std::map<std::string, std::vector<int>>> geof_tile_prefix_slots;
+    size_t other_version_records = 0;
     for (auto &e : geof)
     {
         if (g_tile_to_rows.find(e.tile_id) == g_tile_to_rows.end())
             continue;
+        // A record of the version of a world-state tile that does not stand: the game keeps it for when that
+        // version stands again and applies it only then. It says nothing about the spot as it is now.
+        const int standing = standing_variant(disasters, e.tile_id);
+        if (standing >= 0 && goblin::world_variants::key_variant(e.raw_key) != static_cast<uint32_t>(standing))
+        {
+            ++other_version_records;
+            continue;
+        }
         std::string prefix = prefix_from_model_id(e.model_hash);
         if (prefix.empty())
             continue;
         int slot = aeg099_index_from_geof(e.geom_idx, e.flags);
         geof_tile_prefix_slots[e.tile_id][prefix].push_back(slot);
+    }
+    if (goblin::config::debugLogging)
+    {
+        static size_t s_last_other = SIZE_MAX;  // edge-triggered: the count changes on a load or a switch
+        if (other_version_records != s_last_other)
+        {
+            s_last_other = other_version_records;
+            spdlog::info("[COLLECTED] {} saved record(s) belong to the version of their world-state tile that "
+                         "does not stand now - left for when it stands again", other_version_records);
+        }
     }
 
     // ── WGM: tracking for loaded tiles ──
@@ -1421,11 +1514,15 @@ int goblin::collected::refresh()
     // its live instance now, it stays collected. Respawn (e.g. after grace
     // rest, when the tile reloads with the flower alive) puts the row into
     // demonstrably_alive_rows and breaks the sticky retention.
+    // A row whose world-state tile switched version this refresh is not carried either: it was hidden on
+    // the old version's word, and the standing version's records (above) or its live instances decide it.
     int carried = 0;
     for (uint64_t prev : g_collected_rows)
     {
         if (demonstrably_alive_rows.count(prev))
             continue;  // respawn observed → release
+        if (version_switched_rows.count(prev))
+            continue;  // the other version of its tile stands now
         if (new_collected.insert(prev).second)
             carried++;
     }
@@ -1585,6 +1682,8 @@ void goblin::collected::forget_session_state()
     g_geof_seen_for_character = false;
     g_rebuild_armed = false;
     g_rebuild_hold_since_ms = 0;
+    // The next character's world state is its own: its first reading is a start, not a switch.
+    g_last_disasters = DisasterState{};
     if (dropped > 0)
         spdlog::info("[COLLECTED] character switch: {} row(s) of the previous character released", dropped);
 }

@@ -207,7 +207,7 @@ bool load_map_data()
         e.real_posZ = take<float>(p);
         e.state_flag = take<uint32_t>(p);
         // An unknown polarity is read as no rule: showing a marker is the recoverable mistake.
-        e.state_show = (e.state_flag != 0 && state_show <= static_cast<uint8_t>(StateShow::WhileOff))
+        e.state_show = (e.state_flag != 0 && state_show <= static_cast<uint8_t>(StateShow::OnlyWhileOff))
                            ? static_cast<StateShow>(state_show)
                            : StateShow::Always;
         // Index 0 is the empty name: a row with no MSB object, which is most of them.

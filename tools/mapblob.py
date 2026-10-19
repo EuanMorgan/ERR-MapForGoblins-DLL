@@ -20,7 +20,9 @@ version word is the guard.
     then one 4-byte value per set mask bit, in FIELD_ORDER: f32 for a position, u32 otherwise.
 
 Version 3 added the world-state rule (state_show in the old pad byte, state_flag after real_posZ):
-the marker is shown only while event flag state_flag is ON (1) or OFF (2); 0 = no rule.
+the marker is shown only while event flag state_flag is ON (1) or OFF (2); 0 = no rule. 3 / 4 read
+the same for the map and mean the marker exists only in that state (out of the Progress total while
+the state is away) - new values in the same byte, so still version 3.
 """
 import re
 import struct
@@ -35,7 +37,9 @@ VERSION = 3
 RECORD_HEAD = "<IIBBBBhhHHIffI"
 RECORD_HEAD_SIZE = struct.calcsize(RECORD_HEAD)
 # goblin::generated::StateShow (src/goblin_map_data.hpp): the values the DLL compares against.
-STATE_SHOW = {"always": 0, "while_on": 1, "while_off": 2}
+# only_while_*: shown the same way, but the marker EXISTS only in that state (a spot in one version of a
+# world-state tile, tools/world_variants.py) - while the state is away it is out of the Progress total too.
+STATE_SHOW = {"always": 0, "while_on": 1, "while_off": 2, "only_while_on": 3, "only_while_off": 4}
 # The packer and the DLL walk the mask in this order; it is rowsink's, so a field added there is
 # added here by construction rather than by remembering to.
 FIELD_ORDER = rowsink.FIELDS
@@ -53,7 +57,8 @@ def category_index(header_path):
 
 
 # STATE_SHOW key -> the StateShow enumerator the DLL compares against.
-_STATE_SHOW_ENUM = {"always": "Always", "while_on": "WhileOn", "while_off": "WhileOff"}
+_STATE_SHOW_ENUM = {"always": "Always", "while_on": "WhileOn", "while_off": "WhileOff",
+                    "only_while_on": "OnlyWhileOn", "only_while_off": "OnlyWhileOff"}
 
 
 def check_state_show(header_path):

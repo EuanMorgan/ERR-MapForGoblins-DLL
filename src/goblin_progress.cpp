@@ -304,7 +304,8 @@ bool row_is_trackable(const goblin::generated::MapEntry &e)
 // Nor the world-state rule (Leyndell's capitals, MapEntry::state_flag), which is not in any param
 // field at all: none of these predicates read it, so a marker whose state is away stays in the
 // total and counts as not collected - which it is (and where the state can be switched back, as
-// ERR's Roundtable braziers do, it can still be collected).
+// ERR's Roundtable braziers do, it can still be collected). row_absent_from_world below is the
+// exception: a spot that exists in one version of a world-state tile only.
 bool row_switch_gate_off(const goblin::generated::MapEntry &e)
 {
     const int g2[8] = {e.data.textEnableFlag2Id1, e.data.textEnableFlag2Id2, e.data.textEnableFlag2Id3,
@@ -313,6 +314,17 @@ bool row_switch_gate_off(const goblin::generated::MapEntry &e)
     for (int f : g2)
         if (f > 0 && !goblin::flag_is_set(static_cast<uint32_t>(f))) return true;
     return false;
+}
+
+// A spot that exists in ONE version of a world-state tile (StateShow::OnlyWhile*, e.g. two Ember Pieces of
+// Mistwood that Radahn's star buries) while the other version stands: it is not in the world, so it is out
+// of the total, the way the map does not show it. The Progress page follows the world (decided 2026-10-19):
+// the same spot in BOTH versions is one marker whose collected state follows the version that stands
+// (goblin_collected.cpp), so after the switch it can read "not collected" again - it can be picked again.
+bool row_absent_from_world(const goblin::generated::MapEntry &e)
+{
+    if (e.state_flag == 0 || !goblin::generated::state_rule_exists_only_then(e.state_show)) return false;
+    return !goblin::generated::state_rule_open(e.state_show, goblin::flag_is_set(e.state_flag));
 }
 
 std::vector<goblin::progress::RegionProgress> g_regions;
@@ -366,6 +378,8 @@ void goblin::progress::rebuild()
             continue;  // permanent world feature (stake/spring) - nothing to collect
         if (row_switch_gate_off(e))
             continue;  // switched-chest variant absent in this world-state (the twin is present)
+        if (row_absent_from_world(e))
+            continue;  // a spot of the world-state tile version that is not standing now
 
         const char *en = "Other";
         int32_t place_id = resolve_region(e.data, &en);

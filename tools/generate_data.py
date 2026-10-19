@@ -31,6 +31,7 @@ from pathlib import Path
 
 import mapblob
 import textblob
+import world_variants
 
 # Category mapping: row-file name -> Category enum
 CATEGORY_MAP = {
@@ -253,6 +254,7 @@ def build_map_records(entries, geom_slots=None, state_rules=None):
             raise ValueError(f"world_state_rules.json: two rules for {tile}")
         by_tile[(area, gx, gz)] = (flag, show)
     state_hits = defaultdict(int)
+    variant_hits = defaultdict(int)
 
     lot_linkage = _load_lot_linkage()
     records = []
@@ -290,6 +292,18 @@ def build_map_records(entries, geom_slots=None, state_rules=None):
         state_flag, state_show = by_tile.get(tile, (0, mapblob.STATE_SHOW["always"]))
         if state_flag:
             state_hits[tile] += 1
+        # A spot found in only one version of a world-state tile (world_variants.py, tagged by the piece and
+        # material-node generators): shown, and counted, only while that version stands.
+        variant_only = meta.get('variant_only') if isinstance(meta, dict) else None
+        if variant_only is not None:
+            disaster = world_variants.disaster_of(*tile)
+            if not disaster:
+                raise ValueError(f"row {row_id}: tagged as one world-state version only, but {tile} has one version")
+            if state_flag:
+                raise ValueError(f"row {row_id}: both a tile world-state rule and a one-version spot")
+            state_flag = disaster
+            state_show = mapblob.STATE_SHOW["only_while_on" if variant_only else "only_while_off"]
+            variant_hits[(disaster, variant_only)] += 1
 
         records.append({
             "row_id": row_id, "category": category, "fields": param,
@@ -306,6 +320,9 @@ def build_map_records(entries, geom_slots=None, state_rules=None):
         when = "ON" if show == mapblob.STATE_SHOW["while_on"] else "OFF"
         print(f"  world state: {tile} shown while flag {flag} is {when}: {n} markers"
               + ("  (WARNING: no marker on this tile)" if n == 0 else ""))
+    for (disaster, variant), n in sorted(variant_hits.items()):
+        print(f"  world state: {n} marker(s) exist only while flag {disaster} is {'ON' if variant else 'OFF'} "
+              f"(one version of its tiles)")
     return records
 
 

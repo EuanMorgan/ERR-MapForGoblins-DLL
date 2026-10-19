@@ -327,7 +327,7 @@ STAGES = [
                    ROWS_OUT / 'Reforged - Ember Pieces_slots.json'],
           script='generate_pieces.py',
           also_scripts=['marker_common.py', 'row_id_registry.py', 'icon_registry.py',
-                        'map_categories.py', 'relocating_spawns.py']),
+                        'map_categories.py', 'relocating_spawns.py', 'world_variants.py']),
 
     Stage('scan_gathering_nodes',
           inputs=[MSB_DIR, DATA / 'aeg099_item_mapping.json'],
@@ -349,7 +349,8 @@ STAGES = [
           outputs=[ROWS_OUT / 'Loot - Material Nodes.rows',
                    ROWS_OUT / 'Loot - Material Nodes_slots.json'],
           script='generate_material_nodes.py',
-          also_scripts=['marker_common.py', 'row_id_registry.py', 'icon_registry.py', 'map_categories.py', 'unreachable.py']),
+          also_scripts=['marker_common.py', 'row_id_registry.py', 'icon_registry.py', 'map_categories.py', 'unreachable.py',
+                        'world_variants.py']),
 
     Stage('generate_graces',
           inputs=[REGULATION],
@@ -468,7 +469,7 @@ STAGES = [
           # mapblob.py IS the storage layout; rowsink.py is the field order it packs. textblob.py
           # packs the enemy names and the item fallback; legacy_conv.py resolves the conv chains.
           also_scripts=['config.py', 'icon_registry.py', 'map_categories.py',  # ANON_ICON_ID = iconid("anon")
-                        'mapblob.py', 'rowsink.py', 'textblob.py', 'legacy_conv.py'],
+                        'mapblob.py', 'rowsink.py', 'textblob.py', 'legacy_conv.py', 'world_variants.py'],
           args=['--rows-dir', str(ROWS_OUT)]),
 
     # Tile -> game-zone (PlaceName id) map for the Progress tab, from tile_region_map.json

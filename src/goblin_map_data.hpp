@@ -93,7 +93,32 @@ enum class StateShow : uint8_t
     Always = 0,   // no rule
     WhileOn = 1,  // shown only while state_flag is ON
     WhileOff = 2, // shown only while state_flag is OFF
+    // The same polarities for a marker that EXISTS only in that state: a spot found in one version of a
+    // world-state tile (goblin_world_variants.hpp), gone from the world while the state is away - so it
+    // leaves the Progress total then, where a WhileOn/WhileOff marker (Leyndell's capitals, which ERR
+    // switches back and forth) stays in it as not collected.
+    OnlyWhileOn = 3,
+    OnlyWhileOff = 4,
 };
+
+// Is the world in the state a marker with this rule belongs to? `flag_on` = state_flag read now.
+inline bool state_rule_open(StateShow show, bool flag_on)
+{
+    switch (show)
+    {
+    case StateShow::WhileOn:
+    case StateShow::OnlyWhileOn: return flag_on;
+    case StateShow::WhileOff:
+    case StateShow::OnlyWhileOff: return !flag_on;
+    default: return true;
+    }
+}
+
+// A marker that is not in the world while its state is away (OnlyWhile*).
+inline bool state_rule_exists_only_then(StateShow show)
+{
+    return show == StateShow::OnlyWhileOn || show == StateShow::OnlyWhileOff;
+}
 
 struct MapEntry
 {

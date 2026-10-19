@@ -12,6 +12,7 @@ from pathlib import Path
 
 import rowsink
 import relocating_spawns
+import world_variants
 from marker_common import (DATA_DIR, OUT_DIR as OUTPUT_DIR, OVERWORLD_AREAS,
                              resolve_location_id, resolve_location_id_at,
                              DLC_AREAS, UNDERGROUND_AREAS, get_disp_mask)
@@ -52,6 +53,10 @@ def load_event_flags(csv_path, goods_id):
 
 
 def emit_rows(items, item_name, text_id, icon_id, start_row_id, output_file, event_flags=None):
+    # A spot in only ONE version of a world-state tile (world_variants.py): its marker is baked with that
+    # version's rule (generate_data, StateShow OnlyWhile*). Spots in both keep one marker (dedup below):
+    # the twins share asset name and InstanceID, and the DLL reads the standing version's records.
+    variant_only = world_variants.single_variant_tags(items)
     # Deduplicate: skip _10 variants (post-event duplicates)
     seen_coords = set()
     unique_items = []
@@ -61,7 +66,9 @@ def emit_rows(items, item_name, text_id, icon_id, start_row_id, output_file, eve
             seen_coords.add(key)
             unique_items.append(item)
 
-    print(f"  {item_name}: {len(items)} total, {len(unique_items)} unique")
+    print(f"  {item_name}: {len(items)} total, {len(unique_items)} unique"
+          + (f" ({sum(1 for it in unique_items if id(it) in variant_only)} in one world-state version only)"
+             if variant_only else ""))
 
     flags = list(event_flags) if event_flags else []
     flag_idx = 0
@@ -169,6 +176,8 @@ def emit_rows(items, item_name, text_id, icon_id, start_row_id, output_file, eve
             'msb_x': float(item.get('msb_x', item['x'])),
             'msb_z': float(item.get('msb_z', item['z'])),
         }
+        if id(item) in variant_only:
+            slot_map[row_id2]['variant_only'] = variant_only[id(item)]
         row_id2 += 1
 
     slot_file = output_file.parent / (output_file.stem + "_slots.json")
